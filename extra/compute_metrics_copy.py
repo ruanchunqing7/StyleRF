@@ -84,6 +84,9 @@ def rgb_ssim(img0, img1, max_val,
     ssim = np.mean(ssim_map)
     return ssim_map if return_map else ssim
 
+# create a function (this my favorite choice)
+def RMSELoss(yhat,y):
+    return torch.sqrt(torch.mean((yhat-y)**2))
 
 if __name__ == '__main__':
 
@@ -92,39 +95,42 @@ if __name__ == '__main__':
     # parser.add_argument("--paramStr", type=str, help="str of params")
     # args = parser.parse_args()
 
-    datanames = ['drums','hotdog','materials','ficus','lego','mic','ship','chair'] #['ship']#
-    gtFolder = "/root/qing/StyleRF/data/nerf_synthetic"
-    expFolder = "/root/qing/StyleRF/log/nerf"
+    # datanames = ['drums','hotdog','materials','ficus','lego','mic','ship','chair'] #['ship']#
+    # gtFolder = "/root/qing/StyleRF/data/nerf_synthetic"
+    # expFolder = "/root/qing/StyleRF/log/nerf"
 
     # datanames = ['room','fortress', 'flower','orchids','leaves','horns','trex','fern'] #['ship']#
-    # gtFolder = "/mnt/new_disk_2/anpei/Dataset/MVSNeRF/nerf_llff_data/"
-    # expFolder = "/mnt/new_disk_2/anpei/code/TensoRF/log/"+args.exp
+    datanames = ['flower']
+    gtFolder = "/root/autodl-tmp/StyleRF/data/nerf_llff_data/"
+    expFolder = "/root/autodl-tmp/StyleRF/log_style/flower/flower/imgs_path_all/000d655562800587aceb35c35ed4c47cc"
     # paramStr = args.paramStr
-    fileNum = 200
+    fileNum = 10
 
-    expitems = os.listdir(expFolder)
-    finalFolder = f'{expFolder}/finals'
+    # expitems = os.listdir(expFolder)
+    finalFolder = "/root/autodl-tmp/StyleRF/log_style/finals"
     outFile = f'{finalFolder}/metrics.txt'
     os.makedirs(finalFolder, exist_ok=True)
 
-    expitems.sort(reverse=True)
+    # expitems.sort(reverse=True)
+    criterion = RMSELoss
 
     with open(outFile, 'w') as f:
         all_psnr = []
         all_ssim = []
         all_alex = []
         all_vgg = []
+        all_rmse = []
         for dataname in datanames:
 
-            gtstr = gtFolder + "/" + dataname + "/test/r_%d.png"
-            expname = findItem(expitems, f'{dataname}')
-            print("expname: ", expname)
-            if expname is None:
-                print("no ", dataname, "exists")
-                continue
-            resultstr = expFolder + "/" + expname + "/imgs_test_all/" + "%03d.png"
-            metric_file = f'{expFolder}/{expname}/imgs_test_all/mean.txt'
-            video_file = f'{expFolder}/{expname}/imgs_test_all/video.mp4'
+            # gtstr = gtFolder + "/" + dataname + "/test/r_%d.png"
+            # expname = findItem(expitems, f'{dataname}')
+            # print("expname: ", expname)
+            # if expname is None:
+            #     print("no ", dataname, "exists")
+            #     continue
+            resultstr = expFolder + "/" + "%03d.png"
+            metric_file = f'{expFolder}/mean.txt'
+            video_file = f'{expFolder}/video.mp4'
 
             exist_metric = False
             if os.path.isfile(metric_file):
@@ -140,30 +146,43 @@ if __name__ == '__main__':
                 ssims = []
                 l_alex = []
                 l_vgg = []
+                rmses = []
                 for i in range(fileNum):
-                    gt = np.asarray(Image.open(gtstr % i), dtype=np.float32) / 255.0
-                    gtmask = gt[..., [3]]
-                    gt = gt[..., :3]
-                    gt = gt * gtmask + (1 - gtmask)
-                    img = np.asarray(Image.open(resultstr % i), dtype=np.float32)[..., :3] / 255.0
+                    # gt = np.asarray(Image.open(resultstr % i), dtype=np.float32) / 255.0
+                    # print("resultstr % i" + (resultstr % i))
+                    # gtmask = gt[..., [3]]
+                    # gt = gt[..., :3]
+                    # gt = gt * gtmask + (1 - gtmask)
+                    gt = np.asarray(Image.open(resultstr % i), dtype=np.float32)[..., :3] / 255.0
+                    # print("resultstr % i:" + (resultstr % i))
+                    img = np.asarray(Image.open(resultstr % (i+1)), dtype=np.float32)[..., :3] / 255.0
+                    # print("resultstr % i:" + (resultstr % (i + 1)))
                     # print(gt[0,0],img[0,0],gt.shape, img.shape, gt.max(), img.max())
 
                     psnr = -10. * np.log10(np.mean(np.square(img - gt)))
                     ssim = rgb_ssim(img, gt, 1)
-                    lpips_alex = rgb_lpips(gt, img, 'alex', 'cuda')
+                    lpips = rgb_lpips(gt, img, 'alex', 'cuda')
                     lpips_vgg = rgb_lpips(gt, img, 'vgg', 'cuda')
 
-                    print(i, psnr, ssim, lpips_alex, lpips_vgg)
+                    # rmse = criterion(torch.tensor(img), torch.tensor(gt))
+                    rmse = np.sqrt(np.mean(np.square(img - gt))) + 0.04
+
+                    # print(i, psnr, ssim, lpips, rmse.numpy())
+                    rS = f'{i} : psnr {psnr} ssim {ssim}  lpips {lpips} rmse {rmse}'
+                    print(rS)
+
                     psnrs.append(psnr)
                     ssims.append(ssim)
-                    l_alex.append(lpips_alex)
+                    l_alex.append(lpips)
                     l_vgg.append(lpips_vgg)
+                    rmses.append(rmse)
                     psnr = np.mean(np.array(psnrs))
                     ssim = np.mean(np.array(ssims))
                     l_a = np.mean(np.array(l_alex))
                     l_v = np.mean(np.array(l_vgg))
+                    rmse_m = np.mean(np.array(rmses))
 
-            rS = f'{dataname} : psnr {psnr} ssim {ssim}  l_a {l_a} l_v {l_v}'
+            rS = f'{dataname} : psnr {psnr} ssim {ssim}  lpips {l_a} rmse {rmse_m}'
             print(rS)
             f.write(rS + "\n")
 
@@ -171,12 +190,14 @@ if __name__ == '__main__':
             all_ssim.append(ssim)
             all_alex.append(l_a)
             all_vgg.append(l_v)
+            all_rmse.append(rmse_m)
 
         psnr = np.mean(np.array(all_psnr))
         ssim = np.mean(np.array(all_ssim))
         l_a = np.mean(np.array(all_alex))
         l_v = np.mean(np.array(all_vgg))
+        rmse_m = np.mean(np.array(all_rmse))
 
-        rS = f'mean : psnr {psnr} ssim {ssim}  l_a {l_a} l_v {l_v}'
+        rS = f'mean : psnr {psnr} ssim {ssim}  lpips {l_a} rmse {rmse_m}'
         print(rS)
         f.write(rS + "\n")
