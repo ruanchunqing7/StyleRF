@@ -1,7 +1,7 @@
 dataset_name = llff
-datadir = ./data/nerf_llff_data/trex
-ckpt = ./log_feature/trex/trex.th
-expname = trex
+datadir = ./data/nerf_llff_data/room
+ckpt = ./log_feature/room/room.th
+expname = room
 basedir = ./log_style
 
 nSamples = 300

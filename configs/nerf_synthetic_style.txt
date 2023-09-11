@@ -1,7 +1,7 @@
 dataset_name = blender
-datadir = ./data/nerf_synthetic/lego
-ckpt = ./log_feature/lego/lego.th
-expname = lego
+datadir = ./data/nerf_synthetic/chair
+ckpt = ./log_feature/chair/chair.th
+expname = chair
 basedir = ./log_style
 
 patch_size = 256
@@ -20,3 +20,7 @@ N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 
 fea2denseAct = softplus
+
+render_test = 1
+
+render_only = 1

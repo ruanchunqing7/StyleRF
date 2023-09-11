@@ -1,7 +1,7 @@
 
 dataset_name = llff
-datadir = ./data/nerf_llff_data/trex
-expname = trex
+datadir = ./data/nerf_llff_data/flower
+expname = flower
 basedir = ./log
 
 downsample_train = 4.0
@@ -12,7 +12,7 @@ batch_size = 4096
 
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 262144000 # 640**3
-upsamp_list = [2000,3000,4000,5500]
+upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2500]
 
 N_vis = -1 # vis all testing images

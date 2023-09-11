@@ -1,7 +1,7 @@
 dataset_name = blender
-datadir = ./data/nerf_synthetic/lego
-ckpt = ./log/lego/lego.th
-expname = lego
+datadir = ./data/nerf_synthetic/chair
+ckpt = ./log/chair/chair.th
+expname = chair
 basedir = ./log_feature
 
 TV_weight_feature = 10
