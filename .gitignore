@@ -1,4 +1,6 @@
-./log
-./log_feature
-./log_style
-./data
+log/
+log_feature/
+log_style/
+data/
+.DS_Store
+.idea/
