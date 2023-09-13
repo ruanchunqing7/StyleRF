@@ -1,7 +1,7 @@
 dataset_name = llff
-datadir = ./data/nerf_llff_data/room
-ckpt = ./log_feature/room/room.th
-expname = room
+datadir = ./data/nerf_llff_data/flower
+ckpt = ./log_feature/flower/flower.th
+expname = flower
 basedir = ./log_style
 
 nSamples = 300

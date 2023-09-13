@@ -1,7 +1,7 @@
 dataset_name = llff
-datadir = ./data/nerf_llff_data/room
-ckpt = ./log/room/room.th
-expname = room
+datadir = ./data/nerf_llff_data/flower
+ckpt = ./log/flower/flower.th
+expname = flower
 basedir = ./log_feature
 
 TV_weight_feature = 80
@@ -16,7 +16,7 @@ chunk_size = 4096
 
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 262144000 # 640**3
-upsamp_list = [2000,3000,4000,5500]
+upsamp_list = [2000,3000,4000,5500,7000]
 update_AlphaMask_list = [2500]
 
 n_lamb_sigma = [16,4,4]
