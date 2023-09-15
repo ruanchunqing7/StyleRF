@@ -7,7 +7,7 @@ from dataLoader.ray_utils import ndc_rays_blender, denormalize_vgg, normalize_vg
 
 
 def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, 
-                                render_feature=False, style_img=None, device='cuda'):
+                                render_feature=False, style_img=None, device='cuda', H=256, W=256):
 
     rgbs, alphas, depth_maps, weights, uncertainties = [], [], [], [], []
     features, accs = [], []
@@ -23,6 +23,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
         
         if render_feature:
             feature_map, acc_map = tensorf.render_feature_map(rays_chunk, s_mean_std_mat=s_mean_std_mat, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
+            # feature_map [2048, 256]  acc_map [2048]
             features.append(feature_map)
             accs.append(acc_map)
         else:
@@ -32,7 +33,15 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
     
     if render_feature:
         if style_img is not None:
-            return torch.cat(features), torch.cat(accs), style_feature
+            style_feature_map = style_feature  # [1, 256, 64, 64]
+            features = torch.cat(features) # [65536, 256]
+            content_feature_map = features.reshape(H, W, 256)[None, ...].permute(0, 3, 1, 2)
+            # content_feature_map [1, 256, 256, 256]
+            features = tensorf.net_adaattn_3(content_feature_map, style_feature_map,
+                                             tensorf.get_key([content_feature_map], 0, False),
+                                             tensorf.get_key([style_feature_map], 0, False), 6666)
+            # features [1, 256, 256, 256]
+            return features, torch.cat(accs), style_feature
         return torch.cat(features), torch.cat(accs)
 
     return torch.cat(rgbs), None, torch.cat(depth_maps), None, None 
@@ -164,9 +173,9 @@ def evaluation_feature_path(test_dataset, tensorf, c2ws, renderer, chunk_size=20
                                         white_bg = white_bg, render_feature=True, device=device)
         else:
             feature_map, _, _ = renderer(rays, tensorf, chunk=chunk_size, N_samples=N_samples, ndc_ray=ndc_ray, 
-                                white_bg = white_bg, render_feature=True, style_img=style_img, device=device)
+                                white_bg = white_bg, render_feature=True, style_img=style_img, device=device, H=H, W=W)
         
-        feature_map = feature_map.reshape(H, W, 256)[None,...].permute(0,3,1,2)
+        # feature_map = feature_map.reshape(H, W, 256)[None,...].permute(0,3,1,2)
 
         recon_rgb = denormalize_vgg(tensorf.decoder(feature_map))
         recon_rgb = recon_rgb.permute(0,2,3,1).clamp(0,1)

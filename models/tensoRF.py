@@ -1,6 +1,7 @@
 from .tensorBase import *
+import torch.nn as nn
 from .VGG import Encoder, Decoder, UNetDecoder, PlainDecoder
-from .styleModules import LearnableIN, SimpleLinearStylizer
+from .styleModules import LearnableIN, AdaAttN, SimpleLinearStylizer, mean_variance_norm, init_net
 
 class TensorVMSplit(TensorBase):
     def __init__(self, aabb, gridSize, device, **kargs):
@@ -41,6 +42,9 @@ class TensorVMSplit(TensorBase):
         # self.stylizer = AdaAttN_woin(256, 256).to(device)
         self.stylizer = SimpleLinearStylizer(256).to(device)
 
+        adaattn_3 = AdaAttN(in_planes=256, key_planes=256,
+                        max_sample=64 * 64)
+        self.net_adaattn_3 = init_net(adaattn_3, "normal", 0.02, [0])
 
     def init_svd_volume(self, res, device):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 0.1, device)
@@ -190,9 +194,13 @@ class TensorVMSplit(TensorBase):
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
             xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
+            # xyz_sampled [2048, 300, 3] z_vals [1, 300] ray_valid [2048, 300]
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
+            # dists [1, 300]
             rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
+            # rays_norm [2048, 1]
             dists = dists * rays_norm
+            # dists [2048, 300]
         else:
             xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
@@ -206,41 +214,53 @@ class TensorVMSplit(TensorBase):
 
 
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
+        # sigma [2048, 300]
         if s_mean_std_mat is not None:
             features = torch.zeros((*xyz_sampled.shape[:2], self.stylizer.embed_dim), device=xyz_sampled.device)
         else:
             features = torch.zeros((*xyz_sampled.shape[:2], 256), device=xyz_sampled.device)
-
+        # features [2048, 300, 32]
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)
+            # [2048, 300, 3]
             sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
-
+            # [296244]
             validsigma = self.feature2density(sigma_feature)
+            # [296244]
             sigma[ray_valid] = validsigma
-
+            # [296244]
 
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
-
+        # [2048, 300] [2048, 300] [2048, 1]
         app_mask = weight > self.rayMarch_weight_thres
-
+        # [2048, 300]
         if app_mask.any():
             valid_features = self.compute_feature(xyz_sampled[app_mask]) # [n_valid_points~40k if not specify nSamples, C=256]
-            
+            # valid_features [50304, 256]
             # transform content on 3d
             if s_mean_std_mat is not None:
                 valid_features = self.stylizer.transform_content_3D(valid_features.transpose(0,1)[None,...])
+                # valid_features [1, 32, 50304]
                 valid_features = valid_features.squeeze(0).transpose(0,1)
-
+                # [50304, 32]
             features[app_mask] = valid_features
-
+            # [50304, 32]
         feature_map = torch.sum(weight[..., None] * features, -2)
+        # [2048, 32]
         acc_map = torch.sum(weight, -1)
-        
+        # [2048]
         # style transfer on 2d
+        # if s_mean_std_mat is not None:
+        #     feature_map = self.stylizer.transfer_style_2D(s_mean_std_mat, feature_map.transpose(0,1)[None,...], acc_map)
+        #     feature_map [1, 256, 2048]
+        #     feature_map = feature_map.squeeze().transpose(0,1) # [2048, 256]
+
         if s_mean_std_mat is not None:
-            feature_map = self.stylizer.transfer_style_2D(s_mean_std_mat, feature_map.transpose(0,1)[None,...], acc_map)
+            feature_map = self.stylizer.add_channel(feature_map.transpose(0,1)[None,...])
+            # [1, 256, 2048]
             feature_map = feature_map.squeeze().transpose(0,1)
+            # [2048, 256]
 
         return feature_map, acc_map
 
@@ -344,3 +364,15 @@ class TensorVMSplit(TensorBase):
         newSize = b_r - t_l
         self.aabb = new_aabb
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
+
+    @staticmethod
+    def get_key(feats, last_layer_idx, need_shallow=False):
+        if need_shallow and last_layer_idx > 0:
+            results = []
+            _, _, h, w = feats[last_layer_idx].shape
+            for i in range(last_layer_idx):
+                results.append(mean_variance_norm(nn.functional.interpolate(feats[i], (h, w))))
+            results.append(mean_variance_norm(feats[last_layer_idx]))
+            return torch.cat(results, dim=1)
+        else:
+            return mean_variance_norm(feats[last_layer_idx])

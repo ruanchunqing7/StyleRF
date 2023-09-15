@@ -118,6 +118,7 @@ def reconstruction(args):
     white_bg = train_dataset.white_bg
     near_far = train_dataset.near_far
     h_rays, w_rays = train_dataset.img_wh[1], train_dataset.img_wh[0]
+    # 756 1008
     ndc_ray = args.ndc_ray
 
     patch_size = args.patch_size # ground truth image patch size when training
@@ -144,7 +145,7 @@ def reconstruction(args):
     # TODO: need to update reso_cur
     reso_cur = N_to_reso(args.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
-
+    # 300
 
     assert args.ckpt is not None, 'Have to be pre-trained to get density fielded!'
 
@@ -200,23 +201,30 @@ def reconstruction(args):
 
         rays_train = allrays_stack[frame_idx, start_h:start_h+patch_size, start_w:start_w+patch_size, :]\
                             .reshape(-1, 6).to(device)
-        # [patch*patch, 6]
-        
+        # [patch*patch, 6] [256 * 256, 6]
         rgbs_train = allrgbs_stack[frame_idx, start_h:(start_h+patch_size), 
                                             start_w:(start_w+patch_size), :].to(device)
-        # [patch, patch, 3]
+        # [patch, patch, 3] [256, 256, 3]
 
         feature_map, acc_map, style_feature = renderer(rays_train, tensorf, chunk=args.chunk_size, N_samples=nSamples, white_bg = white_bg, 
                                 ndc_ray=ndc_ray, render_feature=True, style_img=style_img, device=device, is_train=True)
+        # feature_map 原来的 [65536, 256] 现在的 [1, 256, 256, 256]
+        # acc_map [65536]
+        # style_feature.relu3_1 [1, 256, 64, 64] style_feature.relu4_1 [1, 512, 32, 32]
 
-        feature_map = feature_map.reshape(patch_size, patch_size, 256)[None,...].permute(0,3,1,2)
+        # feature_map = feature_map.reshape(patch_size, patch_size, 256)[None,...].permute(0,3,1,2)
+        # [1, 256, 256, 256]
+
         rgb_map = tensorf.decoder(feature_map)
-
+        # [1, 3, 256, 256]
         # feature_map is trained with normalized rgb maps, so here we don't normalize the rgb map again.
         rgbs_train = normalize_vgg(rgbs_train[None,...].permute(0,3,1,2))
-        
+
+        # [1, 3, 256, 256]
         out_image_feature = tensorf.encoder(rgb_map)
+        # out_image_feature.relu3_1 [1, 256, 64, 64]
         content_feature = tensorf.encoder(rgbs_train)
+        # content_feature.relu3_1 [1, 256, 64, 64]
 
         if white_bg:
             mask = acc_map.reshape(patch_size, patch_size, 1)[None,...].permute(0,3,1,2)
