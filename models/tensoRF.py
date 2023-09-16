@@ -45,7 +45,7 @@ class TensorVMSplit(TensorBase):
         # adaattn_3 = AdaAttN(in_planes=256, key_planes=256,
         #                 max_sample=64 * 64)
         transformer = Transformer(
-            in_planes=512, key_planes=512 + 256, shallow_layer=True)
+            in_planes=512, key_planes=512, shallow_layer=False)
         # self.net_adaattn_3 = init_net(adaattn_3, "normal", 0.02, [0])
         self.net_transformer = init_net(transformer, "normal", 0.02, [0])
 

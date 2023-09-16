@@ -46,12 +46,12 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
             #                                  tensorf.get_key(style_features, 0, True), 6666)
             # # features [1, 256, 256, 256]
             cs = tensorf.net_transformer(content_features[0], style_features[0], content_features[1], style_features[1], content_features[2], style_features[2],
-                                      tensorf.get_key(content_features, 0, True),
-                                      tensorf.get_key(style_features, 0, True),
-                                      tensorf.get_key(content_features, 1, True),
-                                      tensorf.get_key(style_features, 1, True),
-                                      tensorf.get_key(content_features, 2, True),
-                                      tensorf.get_key(style_features, 2, True), 6666)
+                                      tensorf.get_key(content_features, 0, False),
+                                      tensorf.get_key(style_features, 0, False),
+                                      tensorf.get_key(content_features, 1, False),
+                                      tensorf.get_key(style_features, 1, False),
+                                      tensorf.get_key(content_features, 2, False),
+                                      tensorf.get_key(style_features, 2, False), 6666)
             # features [1, 256, 256, 256]
             return cs, torch.cat(accs), style_feature
         return torch.cat(features), torch.cat(accs)
