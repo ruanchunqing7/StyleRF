@@ -268,6 +268,43 @@ def mean_variance_norm(feat):
     normalized_feat = (feat - mean.expand(size)) / std.expand(size)
     return normalized_feat
 
+class Transformer(nn.Module):
+
+    def __init__(self, in_planes, key_planes=None, shallow_layer=False):
+        super(Transformer, self).__init__()
+        self.attn_adain_3_1 = AdaAttN(in_planes=256, key_planes=256)
+        self.attn_adain_4_1 = AdaAttN(in_planes=in_planes, key_planes=key_planes)
+        self.attn_adain_5_1 = AdaAttN(in_planes=in_planes,
+                                        key_planes=key_planes + 512 if shallow_layer else key_planes)
+        self.upsample5_1 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.merge_conv_pad = nn.ReflectionPad2d((1, 1, 1, 1))
+        self.merge_conv = nn.Conv2d(in_planes, in_planes, (3, 3))
+        self.prepare_decoder = nn.Sequential(
+            nn.ReflectionPad2d((1, 1, 1, 1)),
+            nn.Conv2d(512, 256, (3, 3)),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='nearest')
+        )
+        self.reduction_channels = nn.Sequential(
+            nn.ReflectionPad2d((1, 1, 1, 1)),
+            nn.Conv2d(512, 256, (3, 3)),
+            nn.ReLU()
+        )
+
+    def forward(self, content3_1, style3_1, content4_1, style4_1, content5_1, style5_1,
+                content3_1_key, style3_1_key, content4_1_key, style4_1_key, content5_1_key, style5_1_key, seed=None):
+        c_adain_feat_3 = self.attn_adain_3_1(content3_1, style3_1, content3_1_key, style3_1_key, 6666)
+        # [1, 256, 256, 256]
+        c_adain_feat_45 = self.merge_conv(self.merge_conv_pad(
+            self.attn_adain_4_1(content4_1, style4_1, content4_1_key, style4_1_key, seed=seed) +
+            self.upsample5_1(self.attn_adain_5_1(content5_1, style5_1, content5_1_key, style5_1_key, seed=seed))))
+        # [1, 512, 128, 128]
+        c_adain_feat_45 = self.prepare_decoder(c_adain_feat_45)
+        # [1, 256, 256, 256]
+        c_adain_feat_345 = torch.cat((c_adain_feat_45, c_adain_feat_3), dim=1)
+        # [1, 512, 256, 256]
+        return self.reduction_channels(c_adain_feat_345) # [1, 256, 256, 256]
+
 # class AdaAttN(nn.Module):
 #     """ Attention-weighted AdaIN (Liu et al., ICCV 21) """
 #

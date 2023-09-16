@@ -16,17 +16,19 @@ class Encoder(nn.Module):
         self.relu2_1 = vgg19[2:7]
         self.relu3_1 = vgg19[7:12]
         self.relu4_1 = vgg19[12:21]
+        self.relu5_1 = vgg19[21:30]
 
         #fix parameters
         self.requires_grad_(False)
 
     def forward(self, x):
-        _output = namedtuple('output', ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1'])
+        _output = namedtuple('output', ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'])
         relu1_1 = self.relu1_1(x)
         relu2_1 = self.relu2_1(relu1_1)
         relu3_1 = self.relu3_1(relu2_1)
         relu4_1 = self.relu4_1(relu3_1)
-        output = _output(relu1_1, relu2_1, relu3_1, relu4_1)
+        relu5_1 = self.relu5_1(relu4_1)
+        output = _output(relu1_1, relu2_1, relu3_1, relu4_1, relu5_1)
 
         return output
 

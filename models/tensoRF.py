@@ -1,7 +1,7 @@
 from .tensorBase import *
 import torch.nn as nn
 from .VGG import Encoder, Decoder, UNetDecoder, PlainDecoder
-from .styleModules import LearnableIN, AdaAttN, SimpleLinearStylizer, mean_variance_norm, init_net
+from .styleModules import LearnableIN, AdaAttN, SimpleLinearStylizer, mean_variance_norm, init_net, Transformer
 
 class TensorVMSplit(TensorBase):
     def __init__(self, aabb, gridSize, device, **kargs):
@@ -42,9 +42,12 @@ class TensorVMSplit(TensorBase):
         # self.stylizer = AdaAttN_woin(256, 256).to(device)
         self.stylizer = SimpleLinearStylizer(256).to(device)
 
-        adaattn_3 = AdaAttN(in_planes=256, key_planes=256,
-                        max_sample=64 * 64)
-        self.net_adaattn_3 = init_net(adaattn_3, "normal", 0.02, [0])
+        # adaattn_3 = AdaAttN(in_planes=256, key_planes=256,
+        #                 max_sample=64 * 64)
+        transformer = Transformer(
+            in_planes=512, key_planes=512 + 256, shallow_layer=True)
+        # self.net_adaattn_3 = init_net(adaattn_3, "normal", 0.02, [0])
+        self.net_transformer = init_net(transformer, "normal", 0.02, [0])
 
     def init_svd_volume(self, res, device):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.gridSize, 0.1, device)

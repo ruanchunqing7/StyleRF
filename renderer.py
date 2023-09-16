@@ -33,15 +33,27 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
     
     if render_feature:
         if style_img is not None:
-            style_feature_map = style_feature  # [1, 256, 64, 64]
+            # style_feature_map = style_feature  # [1, 256, 64, 64]
+            style_features = [style_feature.relu3_1, style_feature.relu4_1, style_feature.relu5_1]
             features = torch.cat(features) # [65536, 256]
-            content_feature_map = features.reshape(H, W, 256)[None, ...].permute(0, 3, 1, 2)
+            content_feature_relu3_1 = features.reshape(H, W, 256)[None, ...].permute(0, 3, 1, 2)
+            content_feature_relu4_1 = tensorf.encoder.relu4_1(content_feature_relu3_1)
+            content_feature_relu5_1 = tensorf.encoder.relu5_1(content_feature_relu4_1)
+            content_features = [content_feature_relu3_1, content_feature_relu4_1, content_feature_relu5_1]
             # content_feature_map [1, 256, 256, 256]
-            features = tensorf.net_adaattn_3(content_feature_map, style_feature_map,
-                                             tensorf.get_key([content_feature_map], 0, False),
-                                             tensorf.get_key([style_feature_map], 0, False), 6666)
+            # c_adain_feat_3 = tensorf.net_adaattn_3(content_features[0], style_features[0],
+            #                                  tensorf.get_key(content_features, 0, True),
+            #                                  tensorf.get_key(style_features, 0, True), 6666)
+            # # features [1, 256, 256, 256]
+            cs = tensorf.net_transformer(content_features[0], style_features[0], content_features[1], style_features[1], content_features[2], style_features[2],
+                                      tensorf.get_key(content_features, 0, True),
+                                      tensorf.get_key(style_features, 0, True),
+                                      tensorf.get_key(content_features, 1, True),
+                                      tensorf.get_key(style_features, 1, True),
+                                      tensorf.get_key(content_features, 2, True),
+                                      tensorf.get_key(style_features, 2, True), 6666)
             # features [1, 256, 256, 256]
-            return features, torch.cat(accs), style_feature
+            return cs, torch.cat(accs), style_feature
         return torch.cat(features), torch.cat(accs)
 
     return torch.cat(rgbs), None, torch.cat(depth_maps), None, None 
@@ -171,6 +183,7 @@ def evaluation_feature_path(test_dataset, tensorf, c2ws, renderer, chunk_size=20
         if style_img is None:
             feature_map, _ = renderer(rays, tensorf, chunk=chunk_size, N_samples=N_samples, ndc_ray=ndc_ray, 
                                         white_bg = white_bg, render_feature=True, device=device)
+            feature_map = feature_map.reshape(H, W, 256)[None, ...].permute(0, 3, 1, 2)
         else:
             feature_map, _, _ = renderer(rays, tensorf, chunk=chunk_size, N_samples=N_samples, ndc_ray=ndc_ray, 
                                 white_bg = white_bg, render_feature=True, style_img=style_img, device=device, H=H, W=W)
