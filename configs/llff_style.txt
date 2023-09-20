@@ -10,6 +10,8 @@ chunk_size = 2048
 
 content_weight = 1
 style_weight = 20
+local_weight = 3
+global_weight = 10
 featuremap_tv_weight = 0
 image_tv_weight = 0
 

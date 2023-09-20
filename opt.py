@@ -67,6 +67,10 @@ def config_parser(cmd=None):
                         help='loss weight')
     parser.add_argument("--content_weight", type=float, default=0,
                         help='loss weight')
+    parser.add_argument("--local_weight", type=float, default=0,
+                        help='loss weight')
+    parser.add_argument("--global_weight", type=float, default=0,
+                        help='loss weight')
     parser.add_argument("--image_tv_weight", type=float, default=0,
                         help='loss weight')
     parser.add_argument("--featuremap_tv_weight", type=float, default=0,

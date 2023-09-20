@@ -1,7 +1,7 @@
 from .tensorBase import *
 import torch.nn as nn
-from .VGG import Encoder, Decoder, UNetDecoder, PlainDecoder
-from .styleModules import LearnableIN, AdaAttN, SimpleLinearStylizer, mean_variance_norm, init_net, Transformer
+from .VGG import Encoder, PlainDecoder
+from .styleModules import LearnableIN, SimpleLinearStylizer, mean_variance_norm, init_net, Transformer, calc_mean_std
 
 class TensorVMSplit(TensorBase):
     def __init__(self, aabb, gridSize, device, **kargs):
@@ -16,6 +16,7 @@ class TensorVMSplit(TensorBase):
         self.app_plane = None
         self.basis_mat = None
         self.renderModule = None
+        self.device = device
 
         # Both encoder and decoder do not require grad when initialized
         self.encoder = Encoder().to(device)
@@ -42,11 +43,8 @@ class TensorVMSplit(TensorBase):
         # self.stylizer = AdaAttN_woin(256, 256).to(device)
         self.stylizer = SimpleLinearStylizer(256).to(device)
 
-        # adaattn_3 = AdaAttN(in_planes=256, key_planes=256,
-        #                 max_sample=64 * 64)
         transformer = Transformer(
-            in_planes=512, key_planes=512, shallow_layer=False)
-        # self.net_adaattn_3 = init_net(adaattn_3, "normal", 0.02, [0])
+             in_planes=512, key_planes=512 + 256 + 128 + 64, shallow_layer=True)
         self.net_transformer = init_net(transformer, "normal", 0.02, [0])
 
     def init_svd_volume(self, res, device):
@@ -260,10 +258,10 @@ class TensorVMSplit(TensorBase):
         #     feature_map = feature_map.squeeze().transpose(0,1) # [2048, 256]
 
         if s_mean_std_mat is not None:
-            feature_map = self.stylizer.add_channel(feature_map.transpose(0,1)[None,...])
-            # [1, 256, 2048]
+            feature_map = self.stylizer.minus_channel(feature_map.transpose(0,1)[None,...])
+            # [1, 64, 2048]
             feature_map = feature_map.squeeze().transpose(0,1)
-            # [2048, 256]
+            # [2048, 64]
 
         return feature_map, acc_map
 
@@ -379,3 +377,45 @@ class TensorVMSplit(TensorBase):
             return torch.cat(results, dim=1)
         else:
             return mean_variance_norm(feats[last_layer_idx])
+
+    def compute_style_loss(self, stylized_feats, s_feats, c_feats):
+        self.max_sample = 64 * 64
+        self.seed = 6666
+        self.criterionMSE = torch.nn.MSELoss().to(self.device)
+        loss_global = torch.tensor(0., device=self.device)
+        for i in range(1, 5):
+            s_feats_mean, s_feats_std = calc_mean_std(s_feats[i])
+            stylized_feats_mean, stylized_feats_std = calc_mean_std(stylized_feats[i])
+            loss_global += self.criterionMSE(
+                stylized_feats_mean, s_feats_mean) + self.criterionMSE(stylized_feats_std, s_feats_std)
+        loss_local = torch.tensor(0., device=self.device)
+        for i in range(1, 5):
+            c_key = self.get_key(c_feats, i, True)
+            s_key = self.get_key(s_feats, i, True)
+            s_value = s_feats[i]
+            b, _, h_s, w_s = s_key.size()
+            s_key = s_key.view(b, -1, h_s * w_s).contiguous()
+            if h_s * w_s > self.max_sample:
+                torch.manual_seed(self.seed)
+                index = torch.randperm(h_s * w_s).to(self.device)[:self.max_sample]
+                s_key = s_key[:, :, index]
+                style_flat = s_value.view(b, -1, h_s * w_s)[:, :, index].transpose(1, 2).contiguous()
+            else:
+                style_flat = s_value.view(b, -1, h_s * w_s).transpose(1, 2).contiguous()
+            b, _, h_c, w_c = c_key.size()
+            c_key = c_key.view(b, -1, h_c * w_c).permute(0, 2, 1).contiguous()
+            attn = torch.bmm(c_key, s_key)
+            # S: b, n_c, n_s
+            attn = torch.softmax(attn, dim=-1)
+            # mean: b, n_c, c
+            mean = torch.bmm(attn, style_flat)
+            # std: b, n_c, c
+            std = torch.sqrt(torch.relu(torch.bmm(attn, style_flat ** 2) - mean ** 2))
+            # mean, std: b, c, h, w
+            mean = mean.view(b, h_c, w_c, -1).permute(0, 3, 1, 2).contiguous()
+            std = std.view(b, h_c, w_c, -1).permute(0, 3, 1, 2).contiguous()
+            loss_local += self.criterionMSE(stylized_feats[i],
+                                                 std * mean_variance_norm(c_feats[i]) + mean)
+
+
+            return loss_global, loss_local

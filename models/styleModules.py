@@ -32,11 +32,11 @@ def cal_mse_content_loss(x, y):
 
 def mean_variance_norm(feat):
     size = feat.size()
-    mean, std = calc_mean_std(feat)
+    mean, std = calc_mean_std_new(feat)
     normalized_feat = (feat - mean.expand(size)) / std.expand(size)
     return normalized_feat
 
-def calc_mean_std(feat, eps=1e-5):
+def calc_mean_std_new(feat, eps=1e-5):
     # eps is a small value added to the variance to avoid divide-by-zero.
     size = feat.size()
     assert (len(size) == 4)
@@ -125,6 +125,8 @@ class SimpleLinearStylizer(nn.Module):
         self.v_embed = nn.Conv1d(input_dim, embed_dim, 1)
 
         self.unzipper = nn.Conv1d(embed_dim, input_dim, 1, bias=0)
+
+        self.zipper = nn.Conv1d(32, 64, 1, bias=0)
 
         s_net = []
         for i in range(n_layers - 1):
@@ -222,6 +224,10 @@ class SimpleLinearStylizer(nn.Module):
         c = self.unzipper(c)  # [N,input_dim,S]
         return c
 
+    def minus_channel(self, c):
+        c = self.zipper(c)
+        return c
+
 class AdaAttN(nn.Module):
 
     def __init__(self, in_planes, max_sample=256 * 256, key_planes=None):
@@ -262,48 +268,59 @@ class AdaAttN(nn.Module):
         std = std.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
         return std * mean_variance_norm(content) + mean
 
-def mean_variance_norm(feat):
-    size = feat.size()
-    mean, std = calc_mean_std(feat)
-    normalized_feat = (feat - mean.expand(size)) / std.expand(size)
-    return normalized_feat
-
 class Transformer(nn.Module):
 
     def __init__(self, in_planes, key_planes=None, shallow_layer=False):
         super(Transformer, self).__init__()
-        self.attn_adain_3_1 = AdaAttN(in_planes=256, key_planes=256)
+        self.attn_adain_3_1 = AdaAttN(in_planes=256, key_planes=256 + 128 + 64 if shallow_layer else 256)
         self.attn_adain_4_1 = AdaAttN(in_planes=in_planes, key_planes=key_planes)
         self.attn_adain_5_1 = AdaAttN(in_planes=in_planes,
                                         key_planes=key_planes + 512 if shallow_layer else key_planes)
-        self.upsample5_1 = nn.Upsample(scale_factor=2, mode='nearest')
-        self.merge_conv_pad = nn.ReflectionPad2d((1, 1, 1, 1))
-        self.merge_conv = nn.Conv2d(in_planes, in_planes, (3, 3))
-        self.prepare_decoder = nn.Sequential(
+        #self.upsample5_1 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.upsample5_4 = nn.Sequential(
+            nn.ReflectionPad2d((1, 1, 1, 1)),
+            nn.Conv2d(512, 512, (3, 3)),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='nearest')
+        )
+        self.upsample4_3 = nn.Sequential(
             nn.ReflectionPad2d((1, 1, 1, 1)),
             nn.Conv2d(512, 256, (3, 3)),
             nn.ReLU(),
             nn.Upsample(scale_factor=2, mode='nearest')
         )
-        self.reduction_channels = nn.Sequential(
+        self.upsample3_2 = nn.Sequential(
             nn.ReflectionPad2d((1, 1, 1, 1)),
             nn.Conv2d(512, 256, (3, 3)),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='nearest')
         )
+        self.upsample2_1 = nn.Sequential(
+            nn.ReflectionPad2d((1, 1, 1, 1)),
+            nn.Conv2d(256, 256, (3, 3)),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2, mode='nearest')
+        )
+        self.merge_conv_pad = nn.ReflectionPad2d((1, 1, 1, 1))
+        self.merge_conv = nn.Conv2d(in_planes, in_planes, (3, 3))
 
     def forward(self, content3_1, style3_1, content4_1, style4_1, content5_1, style5_1,
                 content3_1_key, style3_1_key, content4_1_key, style4_1_key, content5_1_key, style5_1_key, seed=None):
         c_adain_feat_3 = self.attn_adain_3_1(content3_1, style3_1, content3_1_key, style3_1_key, 6666)
-        # [1, 256, 256, 256]
+        # [1, 256, 64, 64]
         c_adain_feat_45 = self.merge_conv(self.merge_conv_pad(
             self.attn_adain_4_1(content4_1, style4_1, content4_1_key, style4_1_key, seed=seed) +
-            self.upsample5_1(self.attn_adain_5_1(content5_1, style5_1, content5_1_key, style5_1_key, seed=seed))))
-        # [1, 512, 128, 128]
-        c_adain_feat_45 = self.prepare_decoder(c_adain_feat_45)
-        # [1, 256, 256, 256]
+            self.upsample5_4(self.attn_adain_5_1(content5_1, style5_1, content5_1_key, style5_1_key, seed=seed))))
+        # [1, 512, 32, 32]
+        c_adain_feat_45 = self.upsample4_3(c_adain_feat_45)
+        # [1, 256, 64, 64]
         c_adain_feat_345 = torch.cat((c_adain_feat_45, c_adain_feat_3), dim=1)
-        # [1, 512, 256, 256]
-        return self.reduction_channels(c_adain_feat_345) # [1, 256, 256, 256]
+        # [1, 512, 64, 64]
+        c_adain_feat_345 = self.upsample3_2(c_adain_feat_345)
+        # [1, 256, 128, 128]
+        c_adain_feat_345 = self.upsample2_1(c_adain_feat_345)
+        # [1, 256, 256, 256]
+        return c_adain_feat_345
 
 # class AdaAttN(nn.Module):
 #     """ Attention-weighted AdaIN (Liu et al., ICCV 21) """

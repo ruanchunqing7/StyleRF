@@ -206,7 +206,7 @@ def reconstruction(args):
                                             start_w:(start_w+patch_size), :].to(device)
         # [patch, patch, 3] [256, 256, 3]
 
-        feature_map, acc_map, style_feature = renderer(rays_train, tensorf, chunk=args.chunk_size, N_samples=nSamples, white_bg = white_bg, 
+        feature_map, acc_map, style_feature, content_features = renderer(rays_train, tensorf, chunk=args.chunk_size, N_samples=nSamples, white_bg = white_bg,
                                 ndc_ray=ndc_ray, render_feature=True, style_img=style_img, device=device, is_train=True)
         # feature_map 原来的 [65536, 256] 现在的 [1, 256, 256, 256]
         # acc_map [65536]
@@ -214,7 +214,6 @@ def reconstruction(args):
 
         # feature_map = feature_map.reshape(patch_size, patch_size, 256)[None,...].permute(0,3,1,2)
         # [1, 256, 256, 256]
-
         rgb_map = tensorf.decoder(feature_map)
         # [1, 3, 256, 256]
         # feature_map is trained with normalized rgb maps, so here we don't normalize the rgb map again.
@@ -247,18 +246,28 @@ def reconstruction(args):
         else:
             # content loss
             content_loss = cal_mse_content_loss(content_feature.relu4_1, out_image_feature.relu4_1)
+
             # style loss
             style_loss = 0.
-            for style_feature, image_feature in zip(style_feature, out_image_feature):
-                style_loss += cal_adain_style_loss(style_feature, image_feature)
+
+            stylized_feats = [out_image_feature.relu1_1, out_image_feature.relu2_1, out_image_feature.relu3_1, out_image_feature.relu4_1, out_image_feature.relu5_1]
+            s_feats = [style_feature.relu1_1, style_feature.relu2_1, style_feature.relu3_1, style_feature.relu4_1, style_feature.relu5_1]
+
+            c_feats = content_features
+
+            loss_global, loss_local = tensorf.compute_style_loss(stylized_feats, s_feats, c_feats)
+            # for style_feature, image_feature in zip(style_feature, out_image_feature):
+            #     style_loss += cal_adain_style_loss(style_feature, image_feature)
 
             content_loss *= args.content_weight
-            style_loss *= args.style_weight
+            # style_loss *= args.style_weight
+            loss_global *= args.global_weight
+            loss_local *= args.local_weight
 
         feature_tv_loss = tvreg(feature_map) * args.featuremap_tv_weight
         image_tv_loss = tvreg(denormalize_vgg(rgb_map)) * args.image_tv_weight
 
-        total_loss = content_loss + style_loss + feature_tv_loss + image_tv_loss
+        total_loss = content_loss + loss_global + loss_local + feature_tv_loss + image_tv_loss
 
         optimizer.zero_grad()
         total_loss.backward()
@@ -276,7 +285,8 @@ def reconstruction(args):
             pbar.set_description(
                 f'Iteration {iteration:05d}:'
                 + f' content_loss = {content_loss.item():.2f}'
-                + f' style_loss = {style_loss.item():.2f}'
+                + f' loss_global = {loss_global.item():.2f}'
+                + f' loss_local = {loss_local.item():.2f}'
             )
        
         if iteration % (args.progress_refresh_rate*20) == 0:
