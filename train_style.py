@@ -1,5 +1,7 @@
 
 import os
+
+import torch
 from tqdm.auto import tqdm
 from opt import config_parser
 from PIL import Image, ImageFile
@@ -75,6 +77,23 @@ def render_test(args):
 
     assert args.style_img is not None, 'Must specify a style image!'
 
+    logfolder = f'{args.basedir}/{args.expname}'
+
+    if os.path.exists(f'{logfolder}/save_V_mean_tensor.pt') and os.path.exists(f'{logfolder}/save_V_std_tensor.pt'):
+        print("save_V_mean_tensor exist and save_V_std_tensor exist")
+        V_mean = torch.load(f'{logfolder}/save_V_mean_tensor.pt')
+        V_std = torch.load(f'{logfolder}/save_V_std_tensor.pt')
+    else:
+        print("save_V_mean_tensor not exist or save_V_std_tensor not exist")
+        V_mean, V_std = pca_style_image(args)
+        torch.save(V_mean, f'{logfolder}/save_V_mean_tensor.pt')
+        torch.save(V_std, f'{logfolder}/save_V_std_tensor.pt')
+
+    print("V_mean")
+    print(V_mean.shape)
+    print("V_std")
+    print(V_std.shape)
+
     ckpt = torch.load(args.ckpt, map_location=device)
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
@@ -108,9 +127,25 @@ def render_test(args):
         c2ws = test_dataset.render_path
         os.makedirs(f'{logfolder}/{args.expname}/imgs_path_all/{style_name}', exist_ok=True)
         evaluation_feature_path(test_dataset, tensorf, c2ws, renderer, args.chunk_size, f'{logfolder}/{args.expname}/imgs_path_all/{style_name}',
-                N_vis=-1, N_samples=-1, white_bg = test_dataset.white_bg, ndc_ray=ndc_ray, style_img=style_img, device=device)
+                N_vis=-1, N_samples=-1, white_bg = test_dataset.white_bg, ndc_ray=ndc_ray, style_img=style_img, device=device, style_img_mean=V_mean, style_img_std=V_std)
 
 def reconstruction(args):
+    logfolder = f'{args.basedir}/{args.expname}'
+
+    if os.path.exists(f'{logfolder}/save_V_mean_tensor.pt') and os.path.exists(f'{logfolder}/save_V_std_tensor.pt'):
+        print("save_V_mean_tensor exist and save_V_std_tensor exist")
+        V_mean = torch.load(f'{logfolder}/save_V_mean_tensor.pt')
+        V_std = torch.load(f'{logfolder}/save_V_std_tensor.pt')
+    else:
+        print("save_V_mean_tensor not exist or save_V_std_tensor not exist")
+        V_mean, V_std = pca_style_image(args)
+        torch.save(V_mean, f'{logfolder}/save_V_mean_tensor.pt')
+        torch.save(V_std, f'{logfolder}/save_V_std_tensor.pt')
+
+    print("V_mean")
+    print(V_mean)
+    print("V_std")
+    print(V_std)
 
     # init dataset
     dataset = dataset_dict[args.dataset_name]
@@ -207,7 +242,7 @@ def reconstruction(args):
         # [patch, patch, 3]
 
         feature_map, acc_map, style_feature = renderer(rays_train, tensorf, chunk=args.chunk_size, N_samples=nSamples, white_bg = white_bg, 
-                                ndc_ray=ndc_ray, render_feature=True, style_img=style_img, device=device, is_train=True)
+                                ndc_ray=ndc_ray, render_feature=True, style_img=style_img, device=device, is_train=True, style_img_mean=V_mean, style_img_std=V_std)
 
         feature_map = feature_map.reshape(patch_size, patch_size, 256)[None,...].permute(0,3,1,2)
         rgb_map = tensorf.decoder(feature_map)
@@ -279,6 +314,86 @@ def reconstruction(args):
                                                 global_step=iteration)
         
     tensorf.save(f'{logfolder}/{args.expname}.th')
+
+def pca_style_image(args):
+    from torch.utils.data import DataLoader
+    from torchvision import datasets
+    import torchvision.transforms as T
+    from PIL import ImageFile
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    assert args.ckpt is not None, 'Have to be pre-trained to get density fielded!'
+
+    ckpt = torch.load(args.ckpt, map_location=device)
+    kwargs = ckpt['kwargs']
+    kwargs.update({'device': device})
+    tensorf = eval(args.model_name)(**kwargs)
+    tensorf.change_to_feature_mod(args.n_lamb_sh, device)
+    tensorf.load(ckpt)
+    tensorf.change_to_style_mod(device)
+    tensorf.rayMarch_weight_thres = args.rm_weight_mask_thre
+    tensorf.train()
+
+    transform = T.Compose([
+        T.Resize(size=(256 * 2, 256 * 2)),
+        T.RandomCrop(256),
+        T.ToTensor(),
+    ])
+
+    train_dataset = datasets.ImageFolder(args.wikiartdir, transform=transform)
+    dataloader = DataLoader(train_dataset, batch_size=1, num_workers=0)
+    all_style_images_mean = []
+    all_style_images_std = []
+
+    for data in enumerate(dataloader):
+        index, style_images = data
+        style_images = style_images[0].to(device)
+        with torch.no_grad():
+            style_feature = tensorf.encoder(normalize_vgg(style_images))
+
+        style_feature = style_feature.relu3_1.flatten(2)
+        s_mean = style_feature.mean(-1, keepdim=True)
+        s_std = style_feature.std(-1, keepdim=True)
+        # s_mean_std = torch.cat((s_mean, s_std), 1)
+        print("s_mean")
+        print(s_mean.shape)
+        all_style_images_mean.append(s_mean)
+        all_style_images_std.append(s_std)
+
+
+    all_style_images_mean = torch.cat(all_style_images_mean)
+    print("1 all_style_images_mean")
+    print(all_style_images_mean.shape)
+    all_style_images_mean = torch.squeeze(all_style_images_mean)
+    print("2 all_style_images_mean")
+    print(all_style_images_mean.shape)
+    U_mean, S_mean, V_mean = torch.pca_lowrank(all_style_images_mean, center=True, q=138)
+    print("S_mean")
+    print(S_mean)
+    print("V_mean")
+    print(V_mean)
+    print("S_mean.shape")
+    print(S_mean.shape)
+    print("V_mean.shape")
+    print(V_mean.shape)
+    all_style_images_mean_pca = torch.mm(all_style_images_mean, V_mean[:, :138])
+
+    all_style_images_std = torch.cat(all_style_images_std)
+    print("1 all_style_images_std")
+    print(all_style_images_std.shape)
+    all_style_images_std = torch.squeeze(all_style_images_std)
+    print("2 all_style_images_std")
+    print(all_style_images_std.shape)
+    U_std, S_std, V_std = torch.pca_lowrank(all_style_images_std, center=True, q=161)
+    print("S_std")
+    print(S_std)
+    print("V_std")
+    print(V_std)
+    print("S_std.shape")
+    print(S_std.shape)
+    print("V_std.shape")
+    print(V_std.shape)
+    all_style_images_std_pca = torch.mm(all_style_images_std, V_std[:, :161])
+    return V_mean, V_std
 
 
 if __name__ == '__main__':

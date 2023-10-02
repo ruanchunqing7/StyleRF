@@ -58,6 +58,9 @@ class SimpleLinearStylizer(nn.Module):
 
         self.unzipper = nn.Conv1d(embed_dim, input_dim, 1, bias=0)
 
+        self.add_mean_channel = nn.Conv1d(138, 256, 1, bias=0)
+        self.add_std_channel = nn.Conv1d(161, 256, 1, bias=0)
+
         s_net = []
         for i in range(n_layers - 1):
             out_dim = max(embed_dim, input_dim // 2)
@@ -128,23 +131,46 @@ class SimpleLinearStylizer(nn.Module):
 
         return c.transpose(1,2)
 
-    def transfer_style_2D(self, s_mean_std_mat, c, acc_map):
+    def transfer_style_2D(self, s_mean_std_mat, c, acc_map, style_img_mean=None, style_img_std=None):
         '''
         Agrs:
             c: content feature map after volume rendering [N,embed_dim,S]
+            [1, 32, 2048]
             s_mat: style matrix [N,embed_dim,embed_dim]
+            [1, 32, 32]
             acc_map: [S]
+            [2048]
             
             s_mean = [N,input_dim,1]
+            [1, 256, 1]
             s_std = [N,input_dim,1]
+            [1, 256, 1]
         '''
         s_mean, s_std, s_mat = s_mean_std_mat
+        s_mean = torch.squeeze(s_mean, dim=2)
+        # [1, 256] style_img_mean [256, 6]
+        s_mean = torch.mm(s_mean, style_img_mean)
+        # [1, 6]
+        s_mean = torch.unsqueeze(s_mean, dim=2)
+        # [1, 6, 1]
+        s_mean = self.add_mean_channel(s_mean)
+        # [1, 256, 1]
+
+        s_std = torch.squeeze(s_std, dim=2)
+        # [1, 256] style_img_std [256, 6]
+        s_std = torch.mm(s_std, style_img_std)
+        # [1, 6]
+        s_std = torch.unsqueeze(s_std, dim=2)
+        # [1, 6, 1]
+        s_std = self.add_std_channel(s_std)
+        # [1, 256, 1]
 
         cs = torch.bmm(s_mat, c) # [N,embed_dim,S]
+        # [1, 32, 2048]
         cs = self.unzipper(cs) # [N,input_dim,S]
-
+        # [1, 256, 2048]
         cs = cs * s_std + s_mean * acc_map[None,None,...]
-
+        # [1, 256, 2048]
         return cs
 
 

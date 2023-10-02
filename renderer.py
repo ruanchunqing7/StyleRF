@@ -7,7 +7,7 @@ from dataLoader.ray_utils import ndc_rays_blender, denormalize_vgg, normalize_vg
 
 
 def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, 
-                                render_feature=False, style_img=None, device='cuda'):
+                                render_feature=False, style_img=None, device='cuda', style_img_mean=None, style_img_std=None):
 
     rgbs, alphas, depth_maps, weights, uncertainties = [], [], [], [], []
     features, accs = [], []
@@ -22,7 +22,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, chunk=4096, N_samples=-1, ndc_ray
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk].to(device)
         
         if render_feature:
-            feature_map, acc_map = tensorf.render_feature_map(rays_chunk, s_mean_std_mat=s_mean_std_mat, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
+            feature_map, acc_map = tensorf.render_feature_map(rays_chunk, s_mean_std_mat=s_mean_std_mat, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, style_img_mean=style_img_mean, style_img_std=style_img_std)
             features.append(feature_map)
             accs.append(acc_map)
         else:
@@ -137,7 +137,7 @@ def evaluation_feature(test_dataset, tensorf, args, renderer, chunk_size=2048, s
 
 @torch.no_grad()
 def evaluation_feature_path(test_dataset, tensorf, c2ws, renderer, chunk_size=2048, savePath=None, N_vis=5, prtx='', N_samples=-1,
-                    white_bg=False, ndc_ray=False, compute_extra_metrics=False, style_img=None, device='cuda'):
+                    white_bg=False, ndc_ray=False, compute_extra_metrics=False, style_img=None, device='cuda', style_img_mean=None, style_img_std=None):
     PSNRs, rgb_maps, vis_feature_maps, depth_maps = [], [], [], []
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
@@ -164,7 +164,7 @@ def evaluation_feature_path(test_dataset, tensorf, c2ws, renderer, chunk_size=20
                                         white_bg = white_bg, render_feature=True, device=device)
         else:
             feature_map, _, _ = renderer(rays, tensorf, chunk=chunk_size, N_samples=N_samples, ndc_ray=ndc_ray, 
-                                white_bg = white_bg, render_feature=True, style_img=style_img, device=device)
+                                white_bg = white_bg, render_feature=True, style_img=style_img, device=device, style_img_mean=style_img_mean, style_img_std=style_img_std)
         
         feature_map = feature_map.reshape(H, W, 256)[None,...].permute(0,3,1,2)
 

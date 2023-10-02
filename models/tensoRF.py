@@ -184,7 +184,7 @@ class TensorVMSplit(TensorBase):
         
 
 
-    def render_feature_map(self, rays_chunk, s_mean_std_mat=None, is_train=False, ndc_ray=False, N_samples=-1):
+    def render_feature_map(self, rays_chunk, s_mean_std_mat=None, is_train=False, ndc_ray=False, N_samples=-1, style_img_mean=None, style_img_std=None):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]
@@ -239,7 +239,7 @@ class TensorVMSplit(TensorBase):
         
         # style transfer on 2d
         if s_mean_std_mat is not None:
-            feature_map = self.stylizer.transfer_style_2D(s_mean_std_mat, feature_map.transpose(0,1)[None,...], acc_map)
+            feature_map = self.stylizer.transfer_style_2D(s_mean_std_mat, feature_map.transpose(0,1)[None,...], acc_map, style_img_mean=style_img_mean, style_img_std=style_img_std)
             feature_map = feature_map.squeeze().transpose(0,1)
 
         return feature_map, acc_map
